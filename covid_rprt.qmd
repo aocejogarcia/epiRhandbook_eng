@@ -1,0 +1,94 @@
+---
+title: "COVID report"
+format: 
+     html: 
+          page-layout: full
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+The database consists of the following variables:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(skimr)
+sheet <- readxl::excel_sheets('data/covid_example_data/covid_example_data.xlsx')
+covid <- readxl::read_xlsx('data/covid_example_data/covid_example_data.xlsx', sheet = sheet)
+skim(covid)
+```
+
+
+From this initial exploration of the dataset, we can see that the symptoms onset ranges from `r format(min(covid$sym_startdt_FALSE, na.rm = T), '%B %d, %Y')` to `r format(max(covid$sym_startdt_FALSE, na.rm = T), '%B %d, %Y')`. Given that COVID-19 was first discovered in Wuhan, China on December, 2019 and the first cases on the United States on January, 2020, we can rule out those with earlier dates, and since we are living on `r format(Sys.Date(), '%Y')` we will rule out those onset dates that are appear after it too. We can check if there are duplicate observations by checking the number of observations `r nrow(covid)` and the number of unique id's `r length(unique(covid$PID))`, a difference of `r nrow(covid) - length(unique(covid$PID))` on the records. After this process we have:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+covid_cl <- covid %>%
+     dplyr::filter(!is.na(sym_startdt_FALSE)) %>%
+     dplyr::filter(sym_startdt_FALSE >= lubridate::dmy('01-01-2020'), sym_startdt_FALSE <= Sys.Date()) %>%
+     dplyr::distinct(PID, .keep_all = TRUE)
+skim(covid_cl)
+```
+
+Which would look like this:
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+covid_cl %>%
+     dplyr::group_by(lubridate::year(lubridate::floor_date(sym_startdt_FALSE, 'week')), lubridate::week(lubridate::floor_date(sym_startdt_FALSE, 'week'))) %>%
+     dplyr::count() %>%
+     dplyr::rename(year = 'lubridate::year(lubridate::floor_date(sym_startdt_FALSE, "week"))', week = 'lubridate::week(lubridate::floor_date(sym_startdt_FALSE, "week"))') %>%
+     dplyr::arrange(year, week) %>%
+     dplyr::mutate(yweek = paste(year, '-', week, sep = '')) %>%
+     dplyr::mutate(yweek = forcats::as_factor(yweek)) %>%
+     plotly::plot_ly() %>%
+     plotly::ungroup() %>%
+     plotly::add_lines(x = ~yweek, name = 'year - week', y = ~n, name = 'Cases') %>%
+     plotly::layout(title = 'COVID-19 cases 2020 - 2021',
+                    xaxis = list(title = 'year-week'),
+                    yaxis = list(title = 'Cases'))
+```
+
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(sf)
+library(leaflet)
+map <- sf::st_read('data/covid_example_data/covid_shapefile/FultonCountyZipCodes.shp') %>% 
+     st_transform(4326)
+covid_zips <- covid_cl %>%
+     filter(format(sym_startdt_FALSE, '%Y') == format(max(sym_startdt_FALSE, na.rm = T), '%Y')) %>%
+     count(case_zip) %>%
+     rename(ZipCode = case_zip) %>%
+     mutate(ZipCode = as.character(ZipCode))
+map <- left_join(map, covid_zips)
+map <- map %>%
+     mutate(Incidence = case_when(
+          Population == 0 ~ 0,
+          n %in% c(NA, 0) ~ 0,
+          TRUE ~ round(n/Population*100000,1)
+     ))
+pal <- colorNumeric(palette = 'YlOrRd',
+                    domain = map$n,
+                    na.color = 'gray')
+
+leaflet::leaflet(map) %>% 
+     leaflet::addPolygons(stroke = T, 
+                          opacity = 1,
+                          color = 'black',
+                          fill = T, 
+                          fillColor = ~pal(n),
+                          fillOpacity = 0.7,
+                          popup = ~paste('Incidence ', format(Incidence, big.mark = ','), ' per 100,000', sep = '')) %>% 
+     leaflet::addProviderTiles(provider = 'OpenStreetMap')
+```
+
+
+The `echo: false` option disables the printing of code (only output is displayed).
