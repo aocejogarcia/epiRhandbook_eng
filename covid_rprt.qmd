@@ -6,13 +6,7 @@ format:
 editor: visual
 ---
 
-## Quarto
-
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
-
-## Running Code
-
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+## Overview  
 
 The database consists of the following variables:
 
@@ -57,38 +51,62 @@ covid_cl %>%
 ```
 
 
+## Maps 
+
+The following map shows the incidence of confirmed cases per 100 000 by zip code in the Fulton County on Georgia, USA on the last 30 days from the last confirmed case. This map has the ability to zoom in and out, as well as to see contiguous places, and if the data allows it, it can also shows pinned cases on these contiguous areas.
+
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 library(sf)
 library(leaflet)
-map <- sf::st_read('data/covid_example_data/covid_shapefile/FultonCountyZipCodes.shp') %>% 
+map <- sf::st_read('data/covid_example_data/covid_shapefile/FultonCountyZipCodes.shp', quiet = T) %>% 
      st_transform(4326)
 covid_zips <- covid_cl %>%
-     filter(format(sym_startdt_FALSE, '%Y') == format(max(sym_startdt_FALSE, na.rm = T), '%Y')) %>%
+     filter(sym_startdt_FALSE >= max(sym_startdt_FALSE, na.rm = T) - 60*60*24*30) %>%
      count(case_zip) %>%
-     rename(ZipCode = case_zip) %>%
+     rename(ZipCode = case_zip, Cases = n) %>%
      mutate(ZipCode = as.character(ZipCode))
 map <- left_join(map, covid_zips)
 map <- map %>%
      mutate(Incidence = case_when(
-          Population == 0 ~ 0,
-          n %in% c(NA, 0) ~ 0,
-          TRUE ~ round(n/Population*100000,1)
+          Population == 0 ~ NA_real_,
+          Cases %in% c(NA, 0) ~ NA_real_,
+          TRUE ~ round(Cases/Population*100000,1)
      ))
-pal <- colorNumeric(palette = 'YlOrRd',
-                    domain = map$n,
-                    na.color = 'gray')
+pal <- colorNumeric(palette = 'YlOrRd', 
+                domain = c(min(map$Incidence, na.rm = T), max(map$Incidence, na.rm = T)), 
+                #bins = 5, 
+                #pretty = T,
+                na.color = 'gray')
+
 
 leaflet::leaflet(map) %>% 
      leaflet::addPolygons(stroke = T, 
                           opacity = 1,
                           color = 'black',
                           fill = T, 
-                          fillColor = ~pal(n),
+                          fillColor = ~pal(Incidence),
                           fillOpacity = 0.7,
                           popup = ~paste('Incidence ', format(Incidence, big.mark = ','), ' per 100,000', sep = '')) %>% 
      leaflet::addProviderTiles(provider = 'OpenStreetMap')
 ```
+
+
+On the other hand, this map is static and only shows the Fulton County data divided by Zip Code, with darker colors showing less amount of cases on the last 30 days from the last confirmed case, grey areas doesn't have cases on those 30 days.
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(ggspatial)
+ggplot(data = map) +
+    geom_sf(aes(fill = Incidence)) +
+    annotation_scale(location = "br", width_hint = 0.5) +
+    annotation_north_arrow(location = "br", which_north = "true", 
+        pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+        style = north_arrow_fancy_orienteering) +
+     coord_sf(xlim = c(-84.8594165660909, -84.07938728142518), ylim = c(33.496878099476476, 34.19517768094271))
+```
+
+
 
 
 The `echo: false` option disables the printing of code (only output is displayed).
